@@ -348,6 +348,8 @@ def finetune_frame(model, X_train, X_test, y_train, y_test, param_grid, cv=10) -
         y_train (pd.DataFrame): Training target variable.
         X_test (pd.DataFrame): Testing features.
         y_test (pd.DataFrame): Testing target variable.
+        param_grid (dict): param_grid of sklearn.GridSearchCV
+        cv: Number of folds
     Returns:
         dict: Dict containing the model's predictions and performance metrics.
     """
