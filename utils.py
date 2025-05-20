@@ -14,6 +14,7 @@ sns.set_theme()
 
 # Some predefined functions which will be moved to utils.py file.
 
+# %%
 def create_dataset(df, window=1, predicted_interval=1, fillna=False, size: None|int=None) -> tuple:
     """
     Create a dataset for time series forecasting by getting the previous window
@@ -23,33 +24,28 @@ def create_dataset(df, window=1, predicted_interval=1, fillna=False, size: None|
         window (int): Number of previous time steps to use as input features.
         predicted_interval (int): Number of time steps to predict.
         fillna (bool): Whether to fill NaN values in the dataset by interpolation with 'time' method.
-        size (int, optional): If specified, randomly sample this number of rows from the dataset.
+        size (int, optional): If specified, get the last `size` rows from the dataset.
     Returns:
         tuple: A tuple containing the input features (X) and target variable (y).
         X (pd.DataFrame): Input features for the model.
         y (pd.Series): Target variable for the model.
     """
 
-    pseudo_df = df.copy()
-    pseudo_df = pseudo_df.asfreq('D')
+    X = df[['Close']]
+    X = X.asfreq('D')
+    X['Target'] = X['Close'].shift(-predicted_interval)
 
-    # Maximum number of rows in the dataset
-    n = len(pseudo_df['Close']) - window - predicted_interval + 1 
-    if len(pseudo_df) < n or window < 1 or predicted_interval < 1 or window > len(pseudo_df) - predicted_interval:
-        raise ValueError(f"You messed up the parameters!\n")
-
-    X = pd.DataFrame(
-        [pseudo_df['Close'].iloc[i:i + window].values.flatten() for i in range(n)],
-        index=pseudo_df.index[window - 1:window - 1 + n],
-        columns=[f'lag_{window - j}' for j in range(window)]
-    )
     if fillna:
-        X = X.interpolate(method='time')        
-    X['target'] = pseudo_df['Close'].shift(-predicted_interval).iloc[window - 1:window - 1 + n]
+        X['Close'] = X['Close'].interpolate(method='time')
+
+    for i in range(window):
+        X[f'Lag_{i}'] = X['Close'].shift(i)     
+
     if size and len(X) > size:
         X = X.tail(size)
     X = X.dropna()
-    y = X.pop('target')
+    X.drop(columns=['Close'], inplace=True)
+    y = X.pop('Target')
     
     return X, y
 
@@ -93,12 +89,14 @@ def split_dataset(X, y, test_size=0.2, method: Literal['half', 'cv']='half'):
         fold_size = int(len(X) * test_size)
         X_trains, X_tests, y_trains, y_tests = [], [], [], []
         for i in range(folds):
-            X_trains.append(X.iloc[start:end])
-            y_trains.append(y.iloc[start:end])
+            X_trains.append(X[:end])
+            y_trains.append(y[:end])
+            X_tests.append(X[start:end])
+            y_tests.append(y[start:end])
             start = end
             end = min(end + fold_size, len(X))
-        X_tests = X_trains[1:]
-        y_tests = y_trains[1:]
+        X_tests = X_tests[1:]
+        y_tests = y_tests[1:]
         X_trains = X_trains[:-1]
         y_trains = y_trains[:-1]
         return X_trains, X_tests, y_trains, y_tests
@@ -361,8 +359,10 @@ def finetune_frame(model, X_train, X_test, y_train, y_test, param_grid, cv=10) -
         transformer=StandardScaler()
     )
 
-    kf = KFold(n_splits=cv, shuffle=False)
-    custom_folds = [(train_index.tolist(), test_index.tolist()) for train_index, test_index in kf.split(X_train)]
+    data = list(range(len(X_train)))
+    k, m = divmod(len(data), cv)
+    temp = [data[i*k + min(i, m) : (i+1)*k + min(i+1, m)] for i in range(cv)]
+    custom_folds = [(list(range(t[0])), t) for t in temp[1:]]
 
     grid_search = GridSearchCV(pipeline, param_grid, cv=custom_folds, scoring='neg_mean_squared_error', n_jobs=-1)
     grid_search.fit(X_train, y_train)
